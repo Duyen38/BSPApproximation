@@ -20,8 +20,8 @@ def lagrange_polynomial(x, y, x_vals):
     return sum
 
 def main():
-    a, b = 0, 50
-    n = 10
+    a, b = 0, 9
+    n = 100
     x = np.linspace(a, b, n)    
     y = []
     y = np.array([func(i) for i in x]) 

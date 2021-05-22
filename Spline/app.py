@@ -1,251 +1,347 @@
+import sys
+import math
+import time
+import numpy as np
+import pandas as pd     # load data from csv files
+import json
+import urllib
+from tkinter.filedialog import Open
+from tkinter import filedialog
+from tkinter import ttk     # as css in tkinter ))
+import tkinter as tk
+from tkinter import messagebox
+from matplotlib.widgets import Cursor
+import matplotlib.widgets as widgets
+from matplotlib.widgets import CheckButtons
+from matplotlib import pyplot as plt
+from matplotlib import style
+import matplotlib.animation as animation
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+
 import matplotlib
 matplotlib.use("TkAgg")
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from matplotlib.figure import Figure
-import matplotlib.animation as animation
-from matplotlib import style
-from matplotlib import pyplot as plt
-from tkinter import messagebox
 
-import tkinter as tk
-from tkinter import ttk     # as css in tkinter ))
+import model.Least_squares as Least_squares
+import model.Lagrange as Lagrange
+import model.CubicSpline as CubicSpline
+import model.B_Spline as B_Spline
+import SnaptoCursor
 
-import urllib
-import json
-import pandas as pd     # load data from csv files
-import numpy as np
-import time
-import math
-import B_Spline
-import CubicSpline
-import Lagrange
+import view.CubicSplinePage as CubicSplinePage
 
-LARGE_FONT = ("Verdana", 12)
-NORM_FONT = ("Verdana", 10)
-SMALL_FONT = ("Verdana", 8)
+LARGE_FONT = ("Verdana", 14)
+NORM_FONT = ("Verdana", 11)
+SMALL_FONT = ("Verdana", 10)
 style.use("ggplot")
 
 fig = Figure()      # figsize=(5,5), dpi=100
 graph = fig.add_subplot(111)
 
-fig1 = Figure()
-graph1 = fig1.add_subplot(111)
-
-fig2 = Figure()
-graph2 = fig2.add_subplot(111)
-
 def func(x: float):
     return float(0.5 * np.sin(0.5*math.pi * x) * np.cos(2*x - math.pi/2))
 
-# paneCount = 1
+def getY(x_list):
+    return np.array([func(i) for i in x_list])
 
-exchange = "B-spline"
-DatCounter = 9000
-programName = "bsp"
+# -----global variables---
+a, b = 0, 40
+n = 200
+x = []
+y = []
+x_vals = []
+x = np.linspace(a, b, n)
+y = np.array([func(i) for i in x])
+x_vals = np.linspace(min(x), max(x), 1000)
+R = 5   # coefficient for Bspline
+h = round((b - a) / (n-1), 2)
+h_R = h*R
+M = 5
 
-def changeExchange(toWhat, pn):
-    global exchange
-    global DatCounter
-    global programName
+bspline = []
+cubic_spline = []
+y_poly_approach = []
 
-    exchange = toWhat
-    programName = pn
-    DatCounter = 9000
+mode_app = 1
+ani = None
+namePage = None
 
-def popupmsg(msg):
-    popup = tk.Tk()
+def addPointToGraph(x_val, y_val):
+    global x, y, b, n
+    x = np.append(x, x_val)
+    y = np.append(y, y_val)
+    b = max(x)
+    n = n+1
+    build()
 
-    popup.wm_title("!")
-    label = ttk.Label(popup, text=msg, font=NORM_FONT)
-    label.pack(side="top", fill="x", pady=10)
-    B1 = ttk.Button(popup, text="Okay", command = popup.destroy)
-    B1.pack()
-    popup.mainloop()
+def changeCoeffBSP(getvalScaleR):
+    global R, h_R
+    R = float(getvalScaleR)
+    if h*R < (a+b)/2:
+        h_R = h*R
+        build()
+    else:
+        messagebox.showerror(title="Error", message="Value R over range! \nNot allow value!")
+
+def changeNumberOfPoint(getvalScaleN):
+    global n
+    if(int(getvalScaleN) > 10):
+        n = int(getvalScaleN)
+        build()
+    else:
+        messagebox.showerror(title="Error", message="Number point invald! \nNot allow value!")
+
+def changeDegreeM(getvalScaleM):
+    global M
+    if(int(getvalScaleM) > 0):
+        M = int(getvalScaleM)
+        build()
+    else:
+        messagebox.showerror(title="Error", message="Invalid value! \nNot allow value!")
+
+def getEntryText(entry):
+    try:
+        value = float(entry.get())
+        print('entry: ', value)
+        return value
+    except ValueError:
+        print("Validate an Entry! You need to entry a number!")
+        messagebox.showerror(title="Error", message="Invalid value! \nYou need to entry a number!")
+
+cursor = None
+cid = None
+time_app_cubic_spline = 0
+time_app_b_spline = 0
+time_app_polymial = 0
 
 def animate(i):
-    # pullData = open("sampleData.txt", "r").read()
-    # dataList = pullData.split('\n')
-    # xList = []
-    # yList = []
-    # for eachLine in dataList:
-    #     if len(eachLine) > 1:
-    #         x, y = eachLine.split(',')
-    #         xList.append(float(x))
-    #         yList.append(float(y))
-    a, b = 0, 50
-    n = 200
-    x = np.linspace(a, b, n)    
-    y = []
-    y = np.array([func(i) for i in x]) 
-    # y = np.exp(-x**2) + 0.1 * np.random.randn(n) 
+    global cursor
+    global cid
+    global graph
+    global mode_app
+    global ani
     
+    st = time.time()
+
+    print('mode_app', mode_app)
+    if mode_app == 1:
+        print('MainPage')        
+        # Main Graph
+        graph.clear()
+        graph.plot(x, y, 'ro', label='Points')
+        l0 = graph.plot(x_vals, bspline, lw='2', color='#5464cc', label='B-spline аpproximation')
+        l1= graph.plot(cubic_spline.x_vals, cubic_spline.S, lw='2', color='#419134', label='Cubic Spline')
+        l2 = graph.plot(x_vals, y_poly_approach,  color='k', label='Polynomial Approximation')
+        graph.legend(bbox_to_anchor=(0, 1.02, 1, .102), loc=3, fontsize = 'medium', ncol=2, borderaxespad=0)
+    
+    if mode_app == 2:
+        print('B-spline Approximation Page')
+
+        graph.clear()
+        graph.set_title('Time: ' + str(time_app_b_spline) + '(s)', loc='right')
+        graph.plot(x, y, 'ro', label='Points')
+        graph.plot(x_vals, bspline, lw='2', color='#5464cc',label='B-spline аpproximation')
+        graph.legend(bbox_to_anchor=(0, 1.02, 1, .102), loc=3, fontsize = 'medium', ncol=2, borderaxespad=0)
+
+        '''Defining the cursor'''
+        cursor = SnaptoCursor.SnaptoCursor(graph, x_vals, bspline, getY(x_vals))
+        cid = fig.canvas.mpl_connect('motion_notify_event', cursor.mouse_move)
+    
+    if mode_app == 3:
+        print('Cubic Spline Interpolation Page')
+
+        graph.clear()
+        graph.set_title('Time: ' + str(time_app_cubic_spline)+ '(s)', loc='right')
+        graph.plot(x, y, 'ro', label='Points')
+        graph.plot(cubic_spline.x_vals, cubic_spline.S, color='#419134', label='Cubic Spline')
+        graph.legend(bbox_to_anchor=(0, 1.02, 1, .102),
+                        loc=3, fontsize = 'medium', ncol=2, borderaxespad=0)
+
+        '''Defining the cursor'''
+        cursor = SnaptoCursor.SnaptoCursor(graph, cubic_spline.x_vals, cubic_spline.S, getY(cubic_spline.x_vals))
+        cid = fig.canvas.mpl_connect('motion_notify_event', cursor.mouse_move)
+
+    if mode_app == 4:
+        print('Polynomial Approximation Page')
+
+        graph.clear()
+        graph.set_title('Time: ' + str(time_app_polymial)+ '(s)', loc='right')
+        graph.plot(x, y, 'ro', label='Points')
+        graph.plot(x_vals, y_poly_approach, color='k', label='Polynomial Approximation')
+        graph.legend(bbox_to_anchor=(0, 1.02, 1, .102), loc=3, fontsize = 'medium', ncol=2, borderaxespad=0)
+
+        '''Defining the cursor'''
+        cursor = SnaptoCursor.SnaptoCursor(graph, x_vals, y_poly_approach, getY(x_vals))
+        cid = fig.canvas.mpl_connect('motion_notify_event', cursor.mouse_move)
+    if ani is not None:
+        ani.pause()
+    end = time.time()
+    print('time', end-st)
+
+def build():
+    global x, y, x_vals
+    global ani
+    global time_app_cubic_spline, time_app_b_spline, time_app_polymial
+    x = np.linspace(a, b, n)
+    y = np.array([func(i) for i in x])
     x_vals = np.linspace(min(x), max(x), 1000) 
 
-    h = round((b - a) / (n-1), 2)
-    R = 5
-    h_R = h*R 
+    global bspline, cubic_spline, y_poly_approach
+    start = time.time()
+    knots1 = B_Spline.build_knot_vector_tmp(a, b, 3, h_R)
+    coeff1 = B_Spline.get_coeff_appromation(x, y, 3, knots1, h_R)
+    bspline = [B_Spline.bspline_element(i, 3, coeff1, knots1, h_R) for i in x_vals]
+    end = time.time()
+    time_app_b_spline = round((end - start),3)
+    
+    start = time.time()
+    cubic_spline = CubicSpline.CubicSplineInterpolator(a, b, (b-a)/1000, n, func)
+    end = time.time()
+    time_app_cubic_spline = round((end - start),3)
 
-    knots1 = B_Spline.build_knot_vector_tmp( a, b, 3, h_R)
-
-    time_start = time.time()
-    coeff1 =  B_Spline.get_coeff_appromation(x, y, 3, knots1,h_R)
-    bspline_draw = [B_Spline.bspline_element(i, 3, coeff1 , knots1, h_R) for i in x_vals]
-    time_end = time.time()
-    print("approach's time:", time_end - time_start)
-
-    graph.clear()
-
-    graph.set_title('В-сплайн третьего порядка \n n = ' + str(n) + '\n за шагом h = ' + str(round(h, 2))
-                +'; h_R = ' + str(round(h*R, 2)) + "\nApproach's time: " +  str(time_end - time_start))
-    graph.plot(x, y, 'ro', label='Points')
-    graph.plot(x_vals, bspline_draw, lw='2', label='B-spline аpproximation')
-    graph.legend(bbox_to_anchor=(0, 1.02, 1, .102), loc=3, ncol=2, borderaxespad=0)
-
-    # Plot the cubic spline interpolation кубический сплайн 
-    time_start = time.time()
-    cubic_spline =  CubicSpline.CubicSplineInterpolator(a, b, (b-a)/1000, n, func) 
-    # y_lagrange = np.array([Lagrange.lagrange_polynomial(x, y, x_val) for x_val in x_vals])               
-    time_end = time.time()
-    print("Time method cubic spline:", time_end - time_start)
-
-    graph1.clear()
-    graph1.set_title('Cubic Spline Interpolation\n n = ' + str(n)  + "\nTime: " +  str(time_end - time_start))
-    graph1.plot(x, y, 'ro', label='Points')
-    graph1.plot(cubic_spline.x_vals, cubic_spline.S, 'r', label='Cubic Spline')
-    # graph1.plot(x_vals, y_lagrange, 'k', label='Интерполяционный многочлeн Лагрaнжа')
-    graph1.legend(bbox_to_anchor=(0, 1.02, 1, .102), loc=3, ncol=2, borderaxespad=0)
-
-
+    start = time.time()
+    y_poly_approach = Least_squares.lst_squares(x, y, M, x_vals)
+    end = time.time()
+    time_app_polymial = round((end - start),3)
+    
+    if ani is not None:
+        ani.resume()
 
 class BSPApp(tk.Tk):
     def __init__(self, *args, **kwargs):
         tk.Tk.__init__(self, *args, **kwargs)
-
+        
         container = tk.Frame(self)
         container.pack(side="top", fill="both", expand=True)
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
+        container.grid_rowconfigure(1, weight=5)
+        container.grid_columnconfigure(1, weight=1)
 
         menubar = tk.Menu(container)
         filemenu = tk.Menu(menubar, tearoff=0)
+
+        self.container = container
+
         menubar.add_cascade(label="File", menu=filemenu)
-        filemenu.add_command(label="Open file", command=lambda: popupmsg("Not suported just yet!")) 
-        filemenu.add_command(label="Save", command=lambda: popupmsg("Not suported just yet!"))       #messagebox.showwarning("Warning","Not suported just yet!") 
+        filemenu.add_command(label="Open file", command=self.openFile)
+        filemenu.add_command(label="Save", command=self.saveFile)
         filemenu.add_separator()
         filemenu.add_command(label="Exit", command=quit)
 
-        exchangeChoice = tk.Menu(menubar, tearoff=0)
-        exchangeChoice.add_command(label="B-Spline", command=lambda: changeExchange("B-spline","bspline"))
-        exchangeChoice.add_command(label="Cubic Spline Interpolation", command=lambda: changeExchange("Cubic-spline","cubicspline"))
-        exchangeChoice.add_command(label="Polynomial Interpolation", command=lambda: changeExchange("Polynomial","polyinter"))
-
-        menubar.add_cascade(label="Exchange", menu=exchangeChoice)
-
-        # parameter = tk.Menu(menubar, tearoff=1)
-        # parameter.add_command(label="Setting x", command=lamb)
+        menubar.add_cascade(label="Help")
 
         tk.Tk.config(self, menu=menubar)
-      
-        self.frame = {}
 
+        # self.current_frame = None
+        # self.frame = {}
         frame = SettingFrame(container, self)
-        self.frame[SettingFrame] = frame
+        # self.frame[SettingFrame] = frame
         frame.grid(row=0, column=0, sticky="nsew")
+        # for Fr in {MainPage, CubicSplinePage, BSplinePage, PolynomialApprochPage}:
+        #     frame = Fr(container, self)
+        #     self.frame[Fr] = frame
+        #     frame.grid(row=0, column=1, sticky="nsew")  # north south east west
+        #     frame.grid_remove()
 
-        for Fr in {MainPage, CubicSplinePage, BSplinePage, PolynomialInterPage}:
-            frame = Fr(container, self)
-            self.frame[Fr] = frame
-            frame.grid(row=0, column=1, sticky="nsew")  # north south east west    
+        frame = MainPage(self.container, self)
+        frame.grid(row=0, column=1, sticky="nsew")  # north south east west
+        
+        self.show_frame(MainPage, 1)
 
-        self.show_frame(MainPage)
+    def openFile(self):
+        ftypes = [('JSON files', '*.json'), ('All files', '*')]
+        dlg = Open(self, filetypes=ftypes)
+        fl = dlg.show()
+        if fl != '':
+            text = self.readFile(fl)
+            if text != '':
+                data = json.loads(text)
+                global a, b, n, R, M
+                a = data["a"]
+                b = data["b"]
+                R = data["R"]
+                M = data["M"]
+                build()
+        else:            
+            messagebox.showerror(title="Error", message="Erorr file!")
 
-    def show_frame(self, control):
-        frame = self.frame[control]
-        frame.tkraise()     # overlap (to stack) frames on top of each other
+    def readFile(self, filename):
+        f = open(filename, "r")
+        text = f.read()
+        if text == '':
+            messagebox.showerror(title="Error", message="Empty file!")
+            return ''
+        else:
+            return text
+
+    def saveFile(self):
+        file = filedialog.asksaveasfile(initialdir="C:\\Users\\duyenNH\\OneDrive\\Documents\\D_Python\\Spline\\data",
+                                        mode='w',
+                                        defaultextension='.json',
+                                        filetype=[("JSON file", ".json"), ("Text file", ".txt"), ("All files", ".*")])
+        if file is None:
+            messagebox.showerror(title="Error", message="Save file unsuccessful!")
+            return
+        data = {
+            'a': a,
+            'b': b,
+            'n': n,
+            'R': R,
+            'M': M
+        }
+        text = json.dumps(data)
+        print(text)
+        file.write(text)
+        file.close()
+
+    def show_frame(self, control, mode):
+        # 1 - MainPage, 2 - B-spline, 3 - Cubic spline, 4 - InterPoly, 5 - ApprPoly
+        global mode_app
+        mode_app = mode
+
+        global namePage
+        if mode_app == 1:
+            namePage = "Main Page"
+        elif mode_app == 2:
+            namePage = "B-spline Page"
+        elif mode_app == 3:
+            namePage = "Cubic Spline Page"
+        else:
+            namePage = "Polynomial Approximation page"
+        if ani is not None:
+            ani.resume()
+        # frame = self.frame[control]
+        # frame.tkraise()     # overlap (to stack) frames on top of each other
+        # if self.current_frame is not None:
+        #     self.current_frame.grid_remove()
+        #     self.current_frame = None
+        # frame = control(self.container, self)
+        # frame.grid(row=0, column=1, sticky="nsew")  # north south east west
+        # self.current_frame = frame
 
 class MainPage(tk.Frame):
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent) 
-        label = tk.Label(self, text="Main page", font=LARGE_FONT)
-        label.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky="snew")
-
-        button1 = ttk.Button(self, text="Cubic Spline", command=lambda: controller.show_frame(CubicSplinePage))
-        button1.grid(row=1, column=0, padx=10, pady=10)
-
-        button2 = ttk.Button(self, text="Bspline Page", command=lambda: controller.show_frame(BSplinePage))
-        button2.grid(row=1, column=1, padx=10, pady=10)
-
-        button2 = ttk.Button(self, text="Polynomial Interpolation", command=lambda: controller.show_frame(PolynomialInterPage))
-        button2.grid(row=1, column=2, padx=10, pady=10)
-
-        button3 = ttk.Button(self, text="exit", command=quit)
-        button3.grid(row=1, column=3, padx=10, pady=10)
-
-class SettingFrame(tk.Frame):
-    def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent)
-        # sw = self.parent.winfo_screenwidth()
-
-        label = tk.Label(self, text="Setting parameters", font=LARGE_FONT)
-        label.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="WE")
-
-        # button1 = ttk.Button(self, text="Back Home", command=lambda: controller.show_frame(MainPage))
-        # button1.grid(row=0, column=0, columnspan=2, padx=10, pady=10, ipady=2, sticky="WE")
-
-        x_lbl = tk.Label(self, text="X: ", font=NORM_FONT)
-        x_lbl.grid(row=1, column=0, padx=5, pady=5, sticky="WE")
-        x_entry = tk.Entry(self, width="20", bd=2)
-        x_entry.grid(row=1, column=1, padx=5, pady=5, sticky="WE")
-
-        y_lbl = tk.Label(self, text="Y: ", font=NORM_FONT)
-        y_lbl.grid(row=2, column=0, padx=5, pady=5, sticky="WE")
-        y_entry = tk.Entry(self, width="20", bd=2)
-        y_entry.grid(row=2, column=1, padx=5, pady=5, sticky="WE")
-
-        def isNumber():
-            try:
-                int(x_entry.get())
-                int(y_entry.get())
-                print("par number is added")
-            except ValueError:
-                print("Validate an Entry! You need to entry a number!")
-
-        btn_add = tk.Button(self, text="Add", command=isNumber)
-        btn_add.grid(row=3, column=1, padx=5, pady=5, sticky="WE")
-
-        R_lbl = tk.Label(self, text="R: ", font=NORM_FONT)
-        R_lbl.grid(row=4, column=0, padx=5, pady=5, sticky="WE")
-        R_scale = tk.Scale(self, from_=0, to=200, orient=tk.HORIZONTAL)
-        R_scale.grid(row=4, column=1, padx=5, pady=5, sticky="WE")
         
+        # label = tk.Label(self, text=namePage, font=LARGE_FONT)          
+        # label.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-class CubicSplinePage(tk.Frame):
+        button = ttk.Button(self, text="Main Page",
+                             command=lambda: controller.show_frame(self, 1))
+        button.pack(side=tk.TOP, fill=tk.X, expand=True)
 
-    def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
-        label = tk.Label(self, text="Cubic Spline Interpolation Page", font=LARGE_FONT)
-        label.pack(padx=10, pady=10)
+        button1 = ttk.Button(self, text="B-spline",
+                             command=lambda: controller.show_frame(self, 2))
+        button1.pack(side=tk.TOP, fill=tk.X, expand=True)
 
-        button1 = ttk.Button(self, text="Back Home", command=lambda: controller.show_frame(MainPage))
-        button1.pack()
-        
-        canvas = FigureCanvasTkAgg(fig1, self)
-        canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        button2 = ttk.Button(self, text="Cubic Spline",
+                            command=lambda: controller.show_frame(self, 3))
+        button2.pack(side=tk.TOP, fill=tk.X, expand=True)
 
-        toolbar = NavigationToolbar2Tk(canvas, self)
-        toolbar.update()
-        canvas._tkcanvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-class BSplinePage(tk.Frame):
-
-    def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
-        label = tk.Label(self, text="Bspline Page", font=LARGE_FONT)
-        label.pack(padx=10, pady=10)
-
-        button1 = ttk.Button(self, text="Back Home", command=lambda: controller.show_frame(MainPage))
-        button1.pack()
+        button3 = ttk.Button(self, text="Polynomial Approximation",
+                             command=lambda: controller.show_frame(self, 4))
+        button3.pack(side=tk.TOP, fill=tk.X, expand=True)
 
         canvas = FigureCanvasTkAgg(fig, self)
         canvas.draw()
@@ -255,26 +351,110 @@ class BSplinePage(tk.Frame):
         toolbar.update()
         canvas._tkcanvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-class PolynomialInterPage(tk.Frame):
-
-     def __init__(self, parent, controller):
+class SettingFrame(tk.Frame):
+    def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent)
-        label = tk.Label(self, text="Polynomial Interpolation Page", font=LARGE_FONT)
-        label.pack(padx=10, pady=10)
 
-        button1 = ttk.Button(self, text="Back Home", command=lambda: controller.show_frame(MainPage))
-        button1.pack()
+        label = tk.Label(self, text="Setting parameters", font=LARGE_FONT)
+        label.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="WE")
 
-        canvas = FigureCanvasTkAgg(fig2, self)
-        canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        label = tk.Label(self, text="Boundaries:", font=SMALL_FONT)
+        label.grid(row=1, column=0, padx=5, pady=5, sticky="WE")
+        
+        def getLeftBoundary(self):
+            global a, x, y, x_vals
+            a = getEntryText(a_entry)            
+            x = np.linspace(a, b, n)
+            y = np.array([func(i) for i in x])
+            x_vals = np.linspace(min(x), max(x), 1000) 
+            build()
 
-        toolbar = NavigationToolbar2Tk(canvas, self)
-        toolbar.update()
-        canvas._tkcanvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        def getRightBoundary(self):
+            global b, x, y, x_vals
+            b = getEntryText(b_entry)            
+            x = np.linspace(a, b, n)
+            y = np.array([func(i) for i in x])
+            x_vals = np.linspace(min(x), max(x), 1000)
+            build()
 
+        a_entry = tk.Entry(self, width=10, justify=tk.CENTER)
+        a_entry.insert(tk.END, str(a))
+        a_entry.bind('<Return>', getLeftBoundary)
+        a_entry.grid(row=1, column=1)
+        b_entry = tk.Entry(self, width=10, justify=tk.CENTER)
+        b_entry.insert(tk.END, str(b))
+        b_entry.bind('<Return>', getRightBoundary)
+        b_entry.grid(row=1, column=2)
+
+        N_lbl = tk.Label(self, text="Number points: ", font=SMALL_FONT)
+        N_lbl.grid(row=3, column=0, padx=5, pady=5, sticky="WE")
+        N_scale = tk.Scale(self, from_=1, to=1000, orient=tk.HORIZONTAL, 
+                        activebackground="#32a88f", resolution=10, command=changeNumberOfPoint)
+        N_scale.set(n)
+        N_scale.grid(row=3, column=1, columnspan=2, padx=5, pady=5, sticky="WE")
+
+        x_lbl = tk.Label(self, text="X: ", font=SMALL_FONT)
+        x_lbl.grid(row=4, column=0, padx=5, pady=5, sticky="WE")
+        x_entry = tk.Entry(self, width="20", bd=2)
+        x_entry.grid(row=4, column=1, padx=5, pady=5, sticky="WE")
+
+        y_lbl = tk.Label(self, text="Y: ", font=SMALL_FONT)
+        y_lbl.grid(row=5, column=0, padx=5, pady=5, sticky="WE")
+        y_entry = tk.Entry(self, width="20", bd=2)
+        y_entry.grid(row=5, column=1, padx=5, pady=5, sticky="WE")
+
+        def isNumber():
+            try:
+                float(x_entry.get())
+                float(y_entry.get())
+                print("par number is added")
+                addPointToGraph(float(x_entry.get()), float(y_entry.get()))
+                build()
+            except ValueError:
+                print("Validate an Entry! You need to entry a number!")
+                messagebox.showerror(title="Error", message="Invalid value! \nYou need to entry a number!")
+
+        btn_add = ttk.Button(self, text="Add", command=isNumber)
+        btn_add.grid(row=6, column=1, padx=5, pady=5, sticky="WE")
+
+        label = tk.Label(self, text="Coefficient Approximation B-spline", font=NORM_FONT)
+        label.grid(row=7, column=0, columnspan=3, padx=10, pady=10)
+
+        hr_lbl = tk.Label(self, text="Delta hR: "+ str(h_R), font=SMALL_FONT)
+        hr_lbl.grid(row=9, column=0, padx=5, sticky="SNWE")
+        def changeCoeffBSP1(valScaleR):
+            global R, h_R
+            R = float(valScaleR)
+            if h*R < (a+b)/2:
+                h_R = h*R
+                hr_lbl.config(text='Delta hR: ' + str(round(h_R, 2)))
+                build()
+            else:
+                messagebox.showerror(title="Error", message="Value R over range! \nNot allow value!")
+        
+        R_lbl = tk.Label(self, text="R: ", font=SMALL_FONT)
+        R_lbl.grid(row=8, column=0, padx=5, sticky="WE")
+        R_scale = tk.Scale(self, from_=1, to=50, orient=tk.HORIZONTAL,
+                    activebackground="#32a88f", tickinterval=10, command=changeCoeffBSP1)
+        R_scale.set(R)
+        R_scale.grid(row=8, column=1, columnspan=2, padx=5, sticky="WE")
+
+        # parameter for polynomial interpolation
+        label = tk.Label(self, text="Coefficient Approximation Polynomial", font=NORM_FONT)
+        label.grid(row=10, column=0, columnspan=3,padx=10, pady=10, sticky="NSWE")
+        M_lbl = tk.Label(self, text="M: ", font=SMALL_FONT)
+        M_lbl.grid(row=11, column=0, padx=5, sticky="WE")
+        M_scale = tk.Scale(self, from_=1, to=50, orient=tk.HORIZONTAL,
+                           activebackground="#32a88f", tickinterval=10, command=changeDegreeM)
+        M_scale.set(M)
+        M_scale.grid(row=11, column=1, columnspan=2, padx=5, sticky="WE")
+
+build()
 app = BSPApp()
 app.title('BSP_APP')
-app.geometry("1280x720")
-ani = animation.FuncAnimation(fig, animate, interval=5000)
+app.geometry("1000x650")  # 1280x720
+
+ani = animation.FuncAnimation(fig, animate, interval=100)
+ani.pause()
+
 app.mainloop()

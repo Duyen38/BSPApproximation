@@ -115,8 +115,8 @@ class CubicSplineInterpolator():
 
         
 def main():
-    a, b = 0, 50
-    n = 10
+    a, b = 0, 9
+    n = 5000
     x = np.linspace(a, b, n)    
     y = []
     y = np.array([function(i) for i in x]) 
@@ -144,7 +144,7 @@ def main():
     plt.grid(True)
 
     # Plot the function with points
-    plt.plot(x_vals, Fx, alpha=0.7, linewidth=4, label='Функция f(x)') #Funcion
+    plt.plot(x_vals, Fx, alpha=0.7, linewidth=2, label='Функция f(x)') #Funcion
     plt.plot(x, y, 'bo')
 
     # Plot the cubic spline interpolation кубический сплайн Cubic spline

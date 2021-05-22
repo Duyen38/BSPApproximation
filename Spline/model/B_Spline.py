@@ -1,48 +1,54 @@
 import sys
 import math
 import numpy as np
+from numpy.core.fromnumeric import shape
 import scipy.linalg as la
 import random
 import time
 import matplotlib.pyplot as plt
-from scipy.interpolate import make_interp_spline
-from scipy.interpolate import make_lsq_spline
+import scipy.sparse as sprase
 
 dict_Bspline = {}       # complex dictionary keys to save values in Bspline
 k = 3
 
-def Bsp(x, i, k, t, h):
-    if(x < t[i] or x >= t[i+4]): return 0
-    elif(t[i] <= x and x < t[i+1]):    
+def Bsp(x, i, t, h):
+    '''x: data
+    i: spline function index
+    t: knot sequence
+    h: distance per point
+    '''
+    if(x <= t[i] or x >= t[i+4]): return 0
+    elif(t[i] < x < t[i+1]):    
         return (pow(x-t[i],3)/(6*pow(h,3)))
-    elif(t[i+1] <= x and x < t[i+2]):
+    elif(t[i+1] <= x < t[i+2]):
         return (pow(h,3) + 3*pow(h,2)*(x-t[i+1]) + 3*h*pow((x-t[i+1]),2) - 3*pow((x-t[i+1]),3)) / (6*pow(h,3))
-    elif(t[i+2] <= x and x < t[i+3]):
+    elif(t[i+2] <= x < t[i+3]):
         return (pow(h,3) + 3*pow(h,2)*(t[i+3]-x) + 3*h*pow((t[i+3]-x),2) - 3*pow((t[i+3]-x),3)) / (6*pow(h,3))
     else:
+    # elif(t[i+3] <= x and x < t[i+4]):
         return pow(t[i+4]-x, 3) / (6*pow(h,3))
 
-def B(x, i, k, t):
-    '''
-    x: data
-    i: spline function index
-    k: degree of spline
-    t: knot sequence
-    '''
-    if (x,i,k) in dict_Bspline:
-        return dict_Bspline.get((x,i,k))
-    else:
-        if k == 0:
-            return 1.0 if t[i] <= x < t[i+1] else 0.0
-        c1, c2 = 0.0, 0.0
-        if t[i+k] > t[i]:
-            c1 = (x - t[i])/(t[i+k] - t[i]) * B(x, i, k-1, t)
-        if t[i+k+1] > t[i+1]:
-            c2 = (t[i+k+1] - x)/(t[i+k+1] - t[i+1]) * B(x, i+1, k-1, t)
+# def B(x, i, k, t):
+#     '''
+#     x: data
+#     i: spline function index
+#     k: degree of spline
+#     t: knot sequence
+#     '''
+#     if (x,i,k) in dict_Bspline:
+#         return dict_Bspline.get((x,i,k))
+#     else:
+#         if k == 0:
+#             return 1.0 if t[i] <= x < t[i+1] else 0.0
+#         c1, c2 = 0.0, 0.0
+#         if t[i+k] > t[i]:
+#             c1 = (x - t[i])/(t[i+k] - t[i]) * B(x, i, k-1, t)
+#         if t[i+k+1] > t[i+1]:
+#             c2 = (t[i+k+1] - x)/(t[i+k+1] - t[i+1]) * B(x, i+1, k-1, t)
 
-        #add to dictionary   
-        dict_Bspline[(x,i,k)] = c1+c2 
-        return c1 + c2
+#         #add to dictionary   
+#         dict_Bspline[(x,i,k)] = c1+c2 
+#         return c1 + c2
 
 def build_knot_vector_tmp(a, b, k, h_R): 
     x_R = []
@@ -59,20 +65,26 @@ def build_knot_vector_tmp(a, b, k, h_R):
         knots.append(x_R[-1]+(i+1)*h_R) 
     return knots  
 
-def build_matrix_bspline(x, k, knot, n, m, hR):
+def build_matrix_bspline(x, knot, n, m, hR):
+    '''
+    knot: Расширенная сетка 
+    k = 3: порядка
+    '''
     A = np.zeros((n, m))
 
     for i in range(n):
-        j_start = i*(m-2)/(n-1) - 2
-        j_end = i*(m-2)/(n-1) + 3
+        j_start = i*(m-3)/(n-1) - 2
+        j_end = i*(m-3)/(n-1) + 2
+        # j_start = i*(m-5)/(n-1)
+        # j_end = i*(m-5)/(n-1) + 4
         
         j_start = math.floor(j_start)
         j_end = math.ceil(j_end)
 
         if(j_start < 0): j_start = 0
-        if(j_end > m): j_end = m
-        for j in range(j_start,j_end):
-            A[i][j] = Bsp(x[i], j, k, knot, hR)
+        if(j_end > m-1): j_end = m-1
+        for j in range(j_start,j_end+1):
+            A[i][j] = Bsp(x[i], j, knot, hR)
     return A
 
 def get_coeff_appromation(x, y, k, knot, hR):
@@ -83,39 +95,34 @@ def get_coeff_appromation(x, y, k, knot, hR):
     '''
     n = len(x)
     m = len(knot)-k-1
-    A = build_matrix_bspline(x, k, knot, n, m, hR)
-    coeff = []
+    A = build_matrix_bspline(x, knot, n, m, hR)
+    coeff = []    
+    # start = time.time()
     if m==n:
         coeff = np.linalg.inv(A) @ y
     elif m < n:
         A_hat = A.T @ A
-        y_hat = A.T @ y                  
+        y_hat = A.T @ y
         L = la.cholesky(A_hat, lower=True)  # lower triangular Cholesky factorization A = L @ L.T
         beta = np.linalg.inv(L) @ y_hat       # L.T @ beta = y_hat
         coeff = np.linalg.inv(L.T) @ beta   # result A @ coeff = Y
 
     else:
         coeff = A.T @  np.linalg.inv(A @ A.T) @ y
+    
+    # end = time.time()
+    # print("time cal A:", end - start)
     return coeff
 
-
-def get_coeff_interpolation(x, y, k, knot, hR):
-    n = len(x)
-    A = build_matrix_bspline(x, k, knot, n, n, hR)
-    # A[-1][-1] = 1
-    # coeff = np.linalg.inv(A_hat) @ y_hat
-    return np.linalg.inv(A.T @ A) @ (A.T @ y)
-
-
-def bspline_element(x, k, c, knot, hR):
+def bspline_element(x, k, coef, knot, hR):
     '''
      k: degree
-     c: coefficients
+     coef: coefficients
      knot: knot
     '''
     n = len(knot) - k - 1
-    assert (n >= k+1) and (len(c) >= n)
-    return sum(c[i] * Bsp(x, i, k, knot, hR) for i in range(n))
+    assert (n >= k+1) and (len(coef) >= n)
+    return sum(coef[i] * Bsp(x, i, knot, hR) for i in range(n))
 
 def func(x):
     return float(0.5 * np.sin(0.5*math.pi * x) * np.cos(2*x - math.pi/2)) #0.5 * np.sin(0.5*math.pi * x) * np.cos(2*x - math.pi/2))#x*x - 4*x - 3
@@ -139,9 +146,9 @@ def plotGraph(n, h, R, x, y, x_vals, bspline):
 
 def main():
     a, b = 0, 20
-    n = 100
-    h = round((b - a) / (n-1), 2)
-    R = 2
+    n = 10000
+    h = (b - a) / (n-1) # round((b - a) / (n-1), 2)
+    R = 5
     h_R = h*R 
     
     x = np.linspace(a, b, n)    
@@ -153,26 +160,27 @@ def main():
     x_vals = np.linspace(min(x), max(x), 1000)  
 
     '''B-spline interpolation''' 
-    # knots = build_knot_vector_tmp( a, b, k, h) 
+    # knots = build_knot_vector_tmp(a, b, k, h) 
 
     # start = time.time()
     # # print("knots: " + str(len(knots)) + ' ' + str(knots))
-    # coeff = get_coeff_appromation(x, y, k, knots)  #get_coeff_interpolation(x, y, k, knots)
-    # bspline = [bspline_element(i, k, coeff , knots, hR) for i in x_vals]
+    # coeff =  get_coeff_appromation(x, y, k, knots,h)
+    # bspline = [bspline_element(i, k, coeff, knots, h) for i in x_vals]
     # end = time.time()
     # print("interpolate's time:", end - start)
 
     '''B-spline аpproximation'''  
-    knots1 = build_knot_vector_tmp( a, b, k, h_R)
+    knots1 = build_knot_vector_tmp(a, b, k, h_R)
+    # print("knots: " + str(len(knots1)) + ' ' + str(knots1))
 
     start = time.time()
-    coeff1 =  get_coeff_appromation(x, y, k, knots1,h_R)
-    bspline_1 = [bspline_element(i, k, coeff1 , knots1, h_R) for i in x_vals]
+    coeff1 =  get_coeff_appromation(x, y, k, knots1, h_R)
+    bspline_1 = [bspline_element(i, k, coeff1, knots1, h_R) for i in x_vals]
 
     end = time.time()
     print("approach's time:", end - start)
 
-    plotGraph(n, h, R, x, y, x_vals, bspline_1)
+    # plotGraph(n, h, R, x, y, x_vals, bspline_1)
 
 if __name__ == '__main__':
     main()   

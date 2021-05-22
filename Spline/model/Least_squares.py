@@ -8,18 +8,19 @@ import matplotlib.pyplot as plt
 def function(x: float):
     return float(0.5 * np.sin(0.5*math.pi * x) * np.cos(2*x - math.pi/2)) # / 6 + 2* math.pi/0.2)) 
 
-def lst_squares(x, y, m):
+def lst_squares(x, y, m, x_vals):
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', np.RankWarning)
-        c_appr = np.polyfit(x, y, m)            # coefficients the polynomial of degree M
-    return c_appr
+        coeff_appr = np.polyfit(x, y, m)            # coefficients the polynomial of degree M
+    poly_approaching = np.poly1d(coeff_appr)
+    y_vals = poly_approaching(x_vals)   
+    return y_vals
         # poly_approaching = np.poly1d(c_appr)
-    
 
 def main():
     a, b = 0, 50
     n = 100
-    m = 50      #degree polynomial
+    m = 20      #degree polynomial
     
     x = np.linspace(a, b, n)    
     y = []
@@ -29,8 +30,9 @@ def main():
     Fx = np.array([function(i) for i in x_vals])      # функция f(x)
 
     start = time.time()
-    coeff = lst_squares(x, y, m)
-    poly_approaching = np.poly1d(coeff)
+    # coeff = lst_squares(x, y, m)
+    # poly_approaching = np.poly1d(coeff)
+    y_pa = lst_squares(x, y, m, x_vals)
     end = time.time()
     print("Time approch_poly:", end - start)
 
@@ -53,7 +55,7 @@ def main():
     #     plt.ylim(min(X)-2, max(Y)+2, 'ro')
         
     # Plot the graph of a polynomial function approaches    Polynomial approximation
-    plt.plot(x_vals, poly_approaching(x_vals),'#e68a00', linewidth=2, label='Аппроксимирующий полином')
+    plt.plot(x_vals, y_pa,'#e68a00', linewidth=2, label='Аппроксимирующий полином')
    
     plt.legend()
     plt.show()
